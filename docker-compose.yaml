@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    container_name: leetrss
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      GIN_MODE: release
+      PORT: 8080
