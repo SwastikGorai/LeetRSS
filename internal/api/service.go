@@ -15,7 +15,7 @@ type UGCFeedService struct {
 	First    int
 }
 
-func (s UGCFeedService) Build(ctx context.Context) ([]byte, error) {
+func (s UGCFeedService) Build(ctx context.Context, selfURL string) ([]byte, error) {
 	articles, err := leetcode.FetchUserSolutionArticles(ctx, s.LC, s.Username, s.First)
 	if err != nil {
 		return nil, err
@@ -43,6 +43,7 @@ func (s UGCFeedService) Build(ctx context.Context) ([]byte, error) {
 	feed := rss.Feed{
 		Title:       fmt.Sprintf("LeetCode Solution Articles — %s", s.Username),
 		Link:        fmt.Sprintf("https://leetcode.com/%s/", s.Username),
+		SelfLink:    selfURL,
 		Description: "Auto-generated RSS feed of your LeetCode Solution Articles (Discuss).",
 		Items:       items,
 	}

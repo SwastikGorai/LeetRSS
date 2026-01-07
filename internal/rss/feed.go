@@ -5,6 +5,7 @@ import "time"
 type Feed struct {
 	Title       string
 	Link        string
+	SelfLink    string
 	Description string
 	Items       []Item
 }
