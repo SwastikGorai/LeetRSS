@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -20,7 +21,7 @@ type ServerConfig struct {
 }
 
 type LeetCodeConfig struct {
-	Username        string
+	Usernames      []string
 	GraphQLEndpoint string
 	Cookie          string
 	CSRF            string
@@ -33,9 +34,18 @@ type CacheConfig struct {
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
-	username := os.Getenv("LEETCODE_USERNAME")
-	if username == "" {
-		return nil, fmt.Errorf("missing env LEETCODE_USERNAME")
+	usernamesStr := os.Getenv("LEETCODE_USERNAMES")
+	if usernamesStr == "" {
+		username := os.Getenv("LEETCODE_USERNAME")
+		if username == "" {
+			return nil, fmt.Errorf("missing env LEETCODE_USERNAMES or LEETCODE_USERNAME")
+		}
+		usernamesStr = username
+	}
+
+	usernames := parseUsernames(usernamesStr)
+	if len(usernames) == 0 {
+		return nil, fmt.Errorf("no valid usernames found in LEETCODE_USERNAMES")
 	}
 
 	cfg := &Config{
@@ -43,7 +53,7 @@ func Load() (*Config, error) {
 			Port: GetEnv("PORT", 8080).(int),
 		},
 		LeetCode: LeetCodeConfig{
-			Username:        username,
+			Usernames:      usernames,
 			GraphQLEndpoint: GetEnv("LEETCODE_GRAPHQL_ENDPOINT", "https://leetcode.com/graphql/").(string),
 			Cookie:          GetEnv("LEETCODE_COOKIE", "").(string),
 			CSRF:            GetEnv("LEETCODE_CSRF", "").(string),
@@ -54,6 +64,18 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseUsernames(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func GetEnv(key string, defaultValue any) any {

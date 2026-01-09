@@ -1,6 +1,6 @@
 # leet-rss (LeetCode RSS)
 
-A small Go HTTP service that generates an RSS 2.0 feed from a users LeetCode Solution Articles (Discuss) using LeetCode’s GraphQL API.
+A small Go HTTP service that generates an RSS 2.0 feed from one or more users' LeetCode Solution Articles (Discuss) using LeetCode’s GraphQL API.
 
 ## What is there
 
@@ -29,7 +29,7 @@ The Go module lives under `leetcode-rss/`:
 Create a local env file at `leetcode-rss/.env` (see `leetcode-rss/.env.example`):
 
 ```dotenv
-LEETCODE_USERNAME=your_username
+LEETCODE_USERNAMES=user_one,user_two,user_three
 PORT=8080
 CACHE_TTL=2m
 LEETCODE_GRAPHQL_ENDPOINT=https://leetcode.com/graphql/
@@ -39,7 +39,7 @@ LEETCODE_CSRF=
 
 Environment variables:
 
-- `LEETCODE_USERNAME` (required): the LeetCode username to generate the feed for
+- `LEETCODE_USERNAMES` (required): comma-separated list of LeetCode usernames to generate the feed for
 - `PORT` (default `8080`): server listen port
 - `CACHE_TTL` (default `2m`): in-memory cache TTL (Go duration format, e.g. `30s`, `5m`)
 - `LEETCODE_GRAPHQL_ENDPOINT` (default `https://leetcode.com/graphql/`): GraphQL endpoint
@@ -71,13 +71,14 @@ curl -i http://localhost:8080/leetcode.xml
 ## How It Works
 
 1. `cmd/api/main.go` loads config from environment (and `.env` if present).
-2. The service calls LeetCode GraphQL to fetch the most recent solution articles (currently `15`).
-3. Each article is mapped to an RSS `<item>` with:
+2. The service calls LeetCode GraphQL to fetch the most recent solution articles for each configured user (currently `15` per user).
+3. Articles from all users are merged and sorted by creation date(most recent first).
+4. Each article is mapped to an RSS `<item>` with:
    - `title`: article title
    - `link`: solution permalink, e.g. `https://leetcode.com/problems/{questionSlug}/solutions/{topicId}/{slug}/`
    - `guid`: stable identifier based on topic and uuid
    - `pubDate`: article creation time
-4. The rendered XML is cached for `CACHE_TTL`.
+5. The rendered XML is cached for `CACHE_TTL`.
 
 ## Development
 
@@ -94,7 +95,7 @@ Run commands from `leetcode-rss/`:
 
 ## Troubleshooting
 
-- `missing env LEETCODE_USERNAME`: set `LEETCODE_USERNAME` in the env or `leetcode-rss/.env`.
+- `missing env LEETCODE_USERNAMES`: set `LEETCODE_USERNAMES` in the env or `leetcode-rss/.env`.
 - `leetcode http 4xx/5xx` or `graphql error`: LeetCode may be rate-limiting, blocking, or returning an error. Increase `CACHE_TTL` and consider setting `LEETCODE_COOKIE`/`LEETCODE_CSRF` if your feed requires authentication.
 - RSS link looks wrong: solution links rely on `questionSlug` returned by the API; if LeetCode changes response fields, the link format may need updating.
 

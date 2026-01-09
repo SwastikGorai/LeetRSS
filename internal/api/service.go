@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"leetcode-rss/internal/leetcode"
@@ -10,19 +11,29 @@ import (
 )
 
 type UGCFeedService struct {
-	Username string
-	LC       *leetcode.Client
-	First    int
+	Usernames []string
+	LC        *leetcode.Client
+	First     int
 }
 
 func (s UGCFeedService) Build(ctx context.Context, selfURL string) ([]byte, error) {
-	articles, err := leetcode.FetchUserSolutionArticles(ctx, s.LC, s.Username, s.First)
-	if err != nil {
-		return nil, err
+	allArticles := make([]leetcode.Article, 0)
+	for _, username := range s.Usernames {
+		articles, err := leetcode.FetchUserSolutionArticles(ctx, s.LC, username, s.First)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching articles for user %s: %w", username, err)
+		}
+		allArticles = append(allArticles, articles...)
 	}
 
-	items := make([]rss.Item, 0, len(articles))
-	for _, a := range articles {
+	sort.Slice(allArticles, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339Nano, allArticles[i].CreatedAt)
+		tj, _ := time.Parse(time.RFC3339Nano, allArticles[j].CreatedAt)
+		return tj.Before(ti)
+	})
+
+	items := make([]rss.Item, 0, len(allArticles))
+	for _, a := range allArticles {
 		t, err := time.Parse(time.RFC3339Nano, a.CreatedAt) //createdAt is like 2026-01-07T03:52:30.464981+00:00
 		if err != nil {
 			t = time.Now().UTC()
@@ -40,14 +51,34 @@ func (s UGCFeedService) Build(ctx context.Context, selfURL string) ([]byte, erro
 		})
 	}
 
+	feedTitle := buildFeedTitle(s.Usernames)
+	feedLink := buildFeedLink(s.Usernames)
+
 	feed := rss.Feed{
-		Title:       fmt.Sprintf("LeetCode Solution Articles — %s", s.Username),
-		Link:        fmt.Sprintf("https://leetcode.com/%s/", s.Username),
+		Title:       feedTitle,
+		Link:        feedLink,
 		SelfLink:    selfURL,
-		Description: "Auto-generated RSS feed of your LeetCode Solution Articles (Discuss).",
+		Description: "Auto-generated RSS feed of LeetCode Solution Articles (Discuss).",
 		Items:       items,
 	}
 	return rss.Render(feed)
+}
+
+func buildFeedTitle(usernames []string) string {
+	if len(usernames) == 0 {
+		return "LeetCode Solution Articles"
+	}
+	if len(usernames) == 1 {
+		return fmt.Sprintf("LeetCode Solution Articles — %s", usernames[0])
+	}
+	return "LeetCode Solution Articles"
+}
+
+func buildFeedLink(usernames []string) string {
+	if len(usernames) == 0 {
+		return "https://leetcode.com/"
+	}
+	return fmt.Sprintf("https://leetcode.com/%s/", usernames[0])
 }
 
 func articleLink(a leetcode.Article) string {
