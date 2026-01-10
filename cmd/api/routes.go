@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func routes(handlers *api.Handlers) http.Handler {
+func routes(handlers *api.Handlers, handlerTimeout time.Duration) http.Handler {
 	g := gin.Default()
 
 	health := g.Group("/health")
@@ -22,7 +22,6 @@ func routes(handlers *api.Handlers) http.Handler {
 		c.String(http.StatusOK, "OK. RSS at /leetcode.xml\n")
 	})
 
-	const handlerTimeout = 10 * time.Second
 	g.GET("/leetcode.xml", withTimeout(handlerTimeout, handlers.RSS))
 
 	return g

@@ -19,7 +19,7 @@ func main() {
 	svc := api.UGCFeedService{
 		Usernames: cfg.LeetCode.Usernames,
 		LC:        lc,
-		First:     15,
+		First:     cfg.LeetCode.MaxArticlesPerUser,
 	}
 
 	cache := api.NewCache(cfg.Cache.TTL)
@@ -27,6 +27,6 @@ func main() {
 
 	log.Printf("listening on :%d (users=%v)", cfg.Server.Port, cfg.LeetCode.Usernames)
 
-	srv := newServer(cfg.Server.Port, routes(handlers))
+	srv := newServer(cfg.Server.Port, routes(handlers, cfg.Server.HandlerTimeout))
 	log.Fatal(srv.ListenAndServe())
 }
