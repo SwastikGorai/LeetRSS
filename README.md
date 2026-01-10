@@ -32,6 +32,8 @@ Create a local env file at `leetcode-rss/.env` (see `leetcode-rss/.env.example`)
 LEETCODE_USERNAMES=user_one,user_two,user_three
 PORT=8080
 CACHE_TTL=2m
+HANDLER_TIMEOUT=10s
+LEETCODE_MAX_ARTICLES=15
 LEETCODE_GRAPHQL_ENDPOINT=https://leetcode.com/graphql/
 LEETCODE_COOKIE=
 LEETCODE_CSRF=
@@ -41,7 +43,9 @@ Environment variables:
 
 - `LEETCODE_USERNAMES` (required): comma-separated list of LeetCode usernames to generate the feed for
 - `PORT` (default `8080`): server listen port
+- `HANDLER_TIMEOUT` (default `10s`): per-request handler timeout (Go duration format)
 - `CACHE_TTL` (default `2m`): in-memory cache TTL (Go duration format, e.g. `30s`, `5m`)
+- `LEETCODE_MAX_ARTICLES` (default `15`): max solution articles fetched per user (clamped to `1..50`)
 - `LEETCODE_GRAPHQL_ENDPOINT` (default `https://leetcode.com/graphql/`): GraphQL endpoint
 - `LEETCODE_COOKIE` (optional): cookie header value for authenticated requests
 - `LEETCODE_CSRF` (optional): CSRF token for authenticated requests
