@@ -34,8 +34,10 @@ type Store interface {
 }
 
 // supported DSN formats:
-//  Local sqlite: "file:./data/leetrss.db" or ":memory:"
-//  TursoDB: "libsql://[db-name]-[org].turso.io?authToken=..."
+//
+//	Local sqlite: "file:./data/leetrss.db" or ":memory:"
+//	TursoDB: "libsql://[db-name]-[org].turso.io?authToken=..."
+//
 // NOTE: all formats are handled by the libsql driver which supports both local and remote.
 func NewStore(dsn string) (Store, error) {
 	switch {

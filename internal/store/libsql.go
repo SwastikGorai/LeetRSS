@@ -15,8 +15,8 @@ type SQLStore struct {
 	db *sql.DB
 }
 
-//  Local sqlite: "file:./data/leetrss.db" or ":memory:"
-//  TursoDB: "libsql://[db-name]-[org].turso.io?authToken=..."
+// Local sqlite: "file:./data/leetrss.db" or ":memory:"
+// TursoDB: "libsql://[db-name]-[org].turso.io?authToken=..."
 func NewSQLStore(dsn string) (*SQLStore, error) {
 	db, err := sql.Open("libsql", dsn)
 	if err != nil {
@@ -41,11 +41,10 @@ func (s *SQLStore) Close() error {
 	return s.db.Close()
 }
 
-// DB returns the underlying database connection for migrations.
+// returns the database connection for migrations and tests
 func (s *SQLStore) DB() *sql.DB {
 	return s.db
 }
-
 
 func (s *SQLStore) CreateUser(ctx context.Context, user *User) error {
 	query := `

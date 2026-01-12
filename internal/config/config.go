@@ -16,6 +16,13 @@ type Config struct {
 	Server   ServerConfig
 	LeetCode LeetCodeConfig
 	Cache    CacheConfig
+	Database DatabaseConfig
+}
+
+type DatabaseConfig struct {
+	URL           string
+	PublicBaseURL string
+	RSSCacheTTL   time.Duration
 }
 
 type ServerConfig struct {
@@ -68,6 +75,11 @@ func Load() (*Config, error) {
 		},
 		Cache: CacheConfig{
 			TTL: GetEnv("CACHE_TTL", 5*time.Minute).(time.Duration),
+		},
+		Database: DatabaseConfig{
+			URL:           GetEnv("DATABASE_URL", "file:./data/leetrss.db?_journal=WAL").(string),
+			PublicBaseURL: GetEnv("PUBLIC_BASE_URL", "http://localhost:8080").(string),
+			RSSCacheTTL:   GetEnv("RSS_CACHE_TTL", 5*time.Minute).(time.Duration),
 		},
 	}
 

@@ -1,10 +1,29 @@
-.PHONY: run test fmt tidy migrate-up migrate-down migrate-status migrate-create
+.PHONY: help run build test fmt tidy migrate-up migrate-down migrate-status migrate-create
 
-# Default database URL for local development
+.DEFAULT_GOAL := help
+
 DATABASE_URL ?= file:./data/leetrss.db?_journal=WAL&_timeout=5000
 
+help:
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  help             Show this help message"
+	@echo "  run              Start the development API server"
+	@echo "  build            Build binary to bin/api"
+	@echo "  test             Run all tests"
+	@echo "  fmt              Format Go source files"
+	@echo "  tidy             Clean up go.mod dependencies"
+	@echo "  migrate-up       Apply pending migrations"
+	@echo "  migrate-down     Rollback last migration"
+	@echo "  migrate-status   Show migration status"
+	@echo "  migrate-create   Create new migration (usage: make migrate-create NAME=add_users)"
+
 run:
-	@go run ./cmd/api
+	@CGO_ENABLED=1 go run ./cmd/api
+
+build:
+	@CGO_ENABLED=1 go build -o bin/api ./cmd/api
 
 test:
 	@go test ./... -mod=readonly
@@ -15,7 +34,6 @@ fmt:
 tidy:
 	@go mod tidy
 
-# Database migrations (requires goose: go install github.com/pressly/goose/v3/cmd/goose@latest)
 migrate-up:
 	@goose -dir migrations sqlite3 "$(DATABASE_URL)" up
 

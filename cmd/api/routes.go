@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func routes(handlers *api.Handlers, handlerTimeout time.Duration) http.Handler {
+func routes(handlers *api.Handlers, publicHandlers *api.PublicFeedHandlers, handlerTimeout time.Duration) http.Handler {
 	g := gin.Default()
 
 	health := g.Group("/health")
@@ -23,6 +23,10 @@ func routes(handlers *api.Handlers, handlerTimeout time.Duration) http.Handler {
 	})
 
 	g.GET("/leetcode.xml", withTimeout(handlerTimeout, handlers.RSS))
+
+	if publicHandlers != nil {
+		g.GET("/f/:feedID/:secret", withTimeout(handlerTimeout, publicHandlers.PublicFeed))
+	}
 
 	return g
 }
