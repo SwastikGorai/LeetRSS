@@ -3,43 +3,66 @@ package main
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"leetcode-rss/internal/api"
 
+	clerkhttp "github.com/clerk/clerk-sdk-go/v2/http"
 	"github.com/gin-gonic/gin"
 )
 
-func routes(handlers *api.Handlers, publicHandlers *api.PublicFeedHandlers, handlerTimeout time.Duration) http.Handler {
+func (app *app) routes() http.Handler {
 	g := gin.Default()
 
 	health := g.Group("/health")
 	{
-		health.GET("", healthHandler)
+		health.GET("", app.healthHandler)
 	}
 
-	g.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "OK. RSS at /leetcode.xml\n")
-	})
+	root := g.Group("/")
+	{
+		root.GET("", app.rootHandler)
+		root.GET("/leetcode.xml", app.withTimeout(app.handlers.RSS))
+	}
 
-	g.GET("/leetcode.xml", withTimeout(handlerTimeout, handlers.RSS))
+	if app.publicHandlers != nil {
+		feeds := g.Group("/f")
+		{
+			feeds.GET("/:feedID/:secret", app.withTimeout(app.publicHandlers.PublicFeed))
+		}
+	}
 
-	if publicHandlers != nil {
-		g.GET("/f/:feedID/:secret", withTimeout(handlerTimeout, publicHandlers.PublicFeed))
+	if app.config.Clerk.SecretKey != "" && app.store != nil {
+		protected := g.Group("/")
+		protected.Use(app.clerkAuthMiddleware())
+		protected.Use(api.RequireAuth(app.store))
+		{
+			// TODO: Add protected endpoints here
+		}
 	}
 
 	return g
 }
 
-func healthHandler(c *gin.Context) {
+func (app *app) healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "OK"})
 }
 
-func withTimeout(d time.Duration, fn gin.HandlerFunc) gin.HandlerFunc {
+func (app *app) rootHandler(c *gin.Context) {
+	c.String(http.StatusOK, "OK. RSS at /leetcode.xml\n")
+}
+
+func (app *app) withTimeout(fn gin.HandlerFunc) gin.HandlerFunc {
+	timeout := app.config.Server.HandlerTimeout
 	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), d)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		fn(c)
 	}
+}
+
+func (app *app) clerkAuthMiddleware() gin.HandlerFunc {
+	passthrough := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	clerkHandler := clerkhttp.RequireHeaderAuthorization()(passthrough)
+	return gin.WrapH(clerkHandler)
 }

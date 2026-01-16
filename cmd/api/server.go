@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-func newServer(port int, handler http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           handler,
+func (app *app) serve() error {
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%d", app.config.Server.Port),
+		Handler:           app.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	return server.ListenAndServe()
 }

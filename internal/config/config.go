@@ -17,12 +17,17 @@ type Config struct {
 	LeetCode LeetCodeConfig
 	Cache    CacheConfig
 	Database DatabaseConfig
+	Clerk    ClerkConfig
 }
 
 type DatabaseConfig struct {
 	URL           string
 	PublicBaseURL string
 	RSSCacheTTL   time.Duration
+}
+
+type ClerkConfig struct {
+	SecretKey string
 }
 
 type ServerConfig struct {
@@ -80,6 +85,9 @@ func Load() (*Config, error) {
 			URL:           GetEnv("DATABASE_URL", "file:./data/leetrss.db?_journal=WAL").(string),
 			PublicBaseURL: GetEnv("PUBLIC_BASE_URL", "http://localhost:8080").(string),
 			RSSCacheTTL:   GetEnv("RSS_CACHE_TTL", 5*time.Minute).(time.Duration),
+		},
+		Clerk: ClerkConfig{
+			SecretKey: GetEnv("CLERK_SECRET_KEY", "").(string),
 		},
 	}
 
