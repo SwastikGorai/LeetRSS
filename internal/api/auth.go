@@ -24,24 +24,14 @@ func RequireAuth(s store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, ok := clerk.SessionClaimsFromContext(c.Request.Context())
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": gin.H{
-					"code":    "unauthorized",
-					"message": "missing or invalid authentication",
-				},
-			})
+			AbortJSONError(c, http.StatusUnauthorized, ErrorCodeUnauthorized, "missing or invalid authentication")
 			return
 		}
 
 		localUser, err := getOrCreateUser(c.Request.Context(), s, claims.Subject)
 		if err != nil {
 			log.Printf("error provisioning user %s: %v", claims.Subject, err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": gin.H{
-					"code":    "internal_error",
-					"message": "failed to provision user",
-				},
-			})
+			AbortJSONError(c, http.StatusInternalServerError, ErrorCodeInternal, "failed to provision user")
 			return
 		}
 

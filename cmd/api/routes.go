@@ -68,7 +68,21 @@ func (app *app) withTimeout(fn gin.HandlerFunc) gin.HandlerFunc {
 }
 
 func (app *app) clerkAuthMiddleware() gin.HandlerFunc {
+	authFailureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"code":"` + api.ErrorCodeUnauthorized + `","message":"Authentication required"}}`))
+	})
 	passthrough := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	clerkHandler := clerkhttp.RequireHeaderAuthorization()(passthrough)
-	return gin.WrapH(clerkHandler)
+	clerkHandler := clerkhttp.WithHeaderAuthorization(
+		clerkhttp.AuthorizationFailureHandler(authFailureHandler),
+	)(passthrough)
+
+	return func(c *gin.Context) {
+		gin.WrapH(clerkHandler)(c)
+		if c.Writer.Status() == http.StatusUnauthorized {
+			c.Abort()
+			return
+		}
+	}
 }

@@ -18,8 +18,6 @@ import (
 )
 
 const (
-	maxFeedsPerUser     = 3
-	maxUsernamesPerFeed = 3
 	defaultFirstPerUser = 15
 	minFirstPerUser     = 1
 	maxFirstPerUser     = 50
@@ -30,43 +28,23 @@ const (
 func (app *app) getCurrentUser(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
 	user, err := app.store.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"code":    "not_found",
-					"message": "user not found",
-				},
-			})
+			api.AbortJSONError(c, http.StatusNotFound, api.ErrorCodeNotFound, "user not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to fetch user",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to fetch user")
 		return
 	}
 
 	feedCount, err := app.store.CountFeedsByUserID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to count feeds",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to count feeds")
 		return
 	}
 
@@ -81,23 +59,13 @@ func (app *app) getCurrentUser(c *gin.Context) {
 func (app *app) listFeeds(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
 	feeds, err := app.store.ListFeedsByUserID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to list feeds",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to list feeds")
 		return
 	}
 
@@ -120,32 +88,17 @@ func (app *app) listFeeds(c *gin.Context) {
 func (app *app) createFeed(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
 	feedCount, err := app.store.CountFeedsByUserID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to count feeds",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to count feeds")
 		return
 	}
-	if feedCount >= maxFeedsPerUser {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"code":    "quota_exceeded",
-				"message": fmt.Sprintf("maximum %d feeds per user", maxFeedsPerUser),
-			},
-		})
+	if feedCount >= app.config.Limits.MaxFeedsPerUser {
+		api.AbortJSONError(c, http.StatusForbidden, api.ErrorCodeQuota, "Feed limit reached")
 		return
 	}
 
@@ -157,52 +110,22 @@ func (app *app) createFeed(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "invalid request body",
-				"details": err.Error(),
-			},
-		})
+		api.AbortJSONErrorWithDetails(c, http.StatusBadRequest, api.ErrorCodeValidation, "invalid request body", err.Error())
 		return
 	}
 
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "name is required",
-			},
-		})
+		api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "name is required")
 		return
 	}
 	if len(req.Name) > maxFeedNameLength {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": fmt.Sprintf("name must be at most %d characters", maxFeedNameLength),
-			},
-		})
+		api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, fmt.Sprintf("name must be at most %d characters", maxFeedNameLength))
 		return
 	}
 
 	if len(req.Usernames) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "at least one username is required",
-			},
-		})
-		return
-	}
-	if len(req.Usernames) > maxUsernamesPerFeed {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": fmt.Sprintf("maximum %d usernames per feed", maxUsernamesPerFeed),
-			},
-		})
+		api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "at least one username is required")
 		return
 	}
 
@@ -226,23 +149,17 @@ func (app *app) createFeed(c *gin.Context) {
 	}
 
 	if len(invalidUsernames) > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "invalid usernames",
-				"details": invalidUsernames,
-			},
-		})
+		api.AbortJSONErrorWithDetails(c, http.StatusBadRequest, api.ErrorCodeValidation, "invalid usernames", invalidUsernames)
 		return
 	}
 
 	if len(validUsernames) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "at least one valid username is required",
-			},
-		})
+		api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "at least one valid username is required")
+		return
+	}
+
+	if len(validUsernames) > app.config.Limits.MaxUsernamesPerFeed {
+		api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, fmt.Sprintf("maximum %d usernames per feed", app.config.Limits.MaxUsernamesPerFeed))
 		return
 	}
 
@@ -258,12 +175,7 @@ func (app *app) createFeed(c *gin.Context) {
 
 	secret, err := generateSecret()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to generate secret",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to generate secret")
 		return
 	}
 
@@ -281,12 +193,7 @@ func (app *app) createFeed(c *gin.Context) {
 	}
 
 	if err := app.store.CreateFeed(c.Request.Context(), feed); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to create feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to create feed")
 		return
 	}
 
@@ -304,12 +211,7 @@ func (app *app) createFeed(c *gin.Context) {
 func (app *app) getFeed(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
@@ -317,30 +219,15 @@ func (app *app) getFeed(c *gin.Context) {
 	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"code":    "not_found",
-					"message": "feed not found",
-				},
-			})
+			api.AbortJSONError(c, http.StatusNotFound, api.ErrorCodeNotFound, "feed not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to fetch feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to fetch feed")
 		return
 	}
 
 	if feed.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"code":    "forbidden",
-				"message": "you do not own this feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusForbidden, api.ErrorCodeForbidden, "you do not own this feed")
 		return
 	}
 
@@ -359,12 +246,7 @@ func (app *app) getFeed(c *gin.Context) {
 func (app *app) updateFeed(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
@@ -372,30 +254,15 @@ func (app *app) updateFeed(c *gin.Context) {
 	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"code":    "not_found",
-					"message": "feed not found",
-				},
-			})
+			api.AbortJSONError(c, http.StatusNotFound, api.ErrorCodeNotFound, "feed not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to fetch feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to fetch feed")
 		return
 	}
 
 	if feed.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"code":    "forbidden",
-				"message": "you do not own this feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusForbidden, api.ErrorCodeForbidden, "you do not own this feed")
 		return
 	}
 
@@ -407,13 +274,7 @@ func (app *app) updateFeed(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "validation_error",
-				"message": "invalid request body",
-				"details": err.Error(),
-			},
-		})
+		api.AbortJSONErrorWithDetails(c, http.StatusBadRequest, api.ErrorCodeValidation, "invalid request body", err.Error())
 		return
 	}
 
@@ -422,21 +283,11 @@ func (app *app) updateFeed(c *gin.Context) {
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": "name cannot be empty",
-				},
-			})
+			api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "name cannot be empty")
 			return
 		}
 		if len(name) > maxFeedNameLength {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": fmt.Sprintf("name must be at most %d characters", maxFeedNameLength),
-				},
-			})
+			api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, fmt.Sprintf("name must be at most %d characters", maxFeedNameLength))
 			return
 		}
 		feed.Name = name
@@ -444,21 +295,7 @@ func (app *app) updateFeed(c *gin.Context) {
 
 	if req.Usernames != nil {
 		if len(req.Usernames) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": "at least one username is required",
-				},
-			})
-			return
-		}
-		if len(req.Usernames) > maxUsernamesPerFeed {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": fmt.Sprintf("maximum %d usernames per feed", maxUsernamesPerFeed),
-				},
-			})
+			api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "at least one username is required")
 			return
 		}
 
@@ -482,23 +319,17 @@ func (app *app) updateFeed(c *gin.Context) {
 		}
 
 		if len(invalidUsernames) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": "invalid usernames",
-					"details": invalidUsernames,
-				},
-			})
+			api.AbortJSONErrorWithDetails(c, http.StatusBadRequest, api.ErrorCodeValidation, "invalid usernames", invalidUsernames)
+			return
+		}
+
+		if len(validUsernames) > app.config.Limits.MaxUsernamesPerFeed {
+			api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, fmt.Sprintf("maximum %d usernames per feed", app.config.Limits.MaxUsernamesPerFeed))
 			return
 		}
 
 		if len(validUsernames) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"code":    "validation_error",
-					"message": "at least one valid username is required",
-				},
-			})
+			api.AbortJSONError(c, http.StatusBadRequest, api.ErrorCodeValidation, "at least one valid username is required")
 			return
 		}
 
@@ -521,12 +352,7 @@ func (app *app) updateFeed(c *gin.Context) {
 	feed.UpdatedAt = time.Now()
 
 	if err := app.store.UpdateFeed(c.Request.Context(), feed); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to update feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to update feed")
 		return
 	}
 
@@ -549,12 +375,7 @@ func (app *app) updateFeed(c *gin.Context) {
 func (app *app) rotateFeedSecret(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
@@ -562,41 +383,21 @@ func (app *app) rotateFeedSecret(c *gin.Context) {
 	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"code":    "not_found",
-					"message": "feed not found",
-				},
-			})
+			api.AbortJSONError(c, http.StatusNotFound, api.ErrorCodeNotFound, "feed not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to fetch feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to fetch feed")
 		return
 	}
 
 	if feed.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"code":    "forbidden",
-				"message": "you do not own this feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusForbidden, api.ErrorCodeForbidden, "you do not own this feed")
 		return
 	}
 
 	newSecret, err := generateSecret()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to generate secret",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to generate secret")
 		return
 	}
 
@@ -604,12 +405,7 @@ func (app *app) rotateFeedSecret(c *gin.Context) {
 	feed.UpdatedAt = time.Now()
 
 	if err := app.store.UpdateFeed(c.Request.Context(), feed); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to update feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to update feed")
 		return
 	}
 
@@ -628,12 +424,7 @@ func (app *app) rotateFeedSecret(c *gin.Context) {
 func (app *app) deleteFeed(c *gin.Context) {
 	userID, ok := api.GetUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "missing user context",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "missing user context")
 		return
 	}
 
@@ -641,40 +432,20 @@ func (app *app) deleteFeed(c *gin.Context) {
 	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
-					"code":    "not_found",
-					"message": "feed not found",
-				},
-			})
+			api.AbortJSONError(c, http.StatusNotFound, api.ErrorCodeNotFound, "feed not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to fetch feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to fetch feed")
 		return
 	}
 
 	if feed.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"code":    "forbidden",
-				"message": "you do not own this feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusForbidden, api.ErrorCodeForbidden, "you do not own this feed")
 		return
 	}
 
 	if err := app.store.DeleteFeed(c.Request.Context(), feedID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "internal_error",
-				"message": "failed to delete feed",
-			},
-		})
+		api.AbortJSONError(c, http.StatusInternalServerError, api.ErrorCodeInternal, "failed to delete feed")
 		return
 	}
 

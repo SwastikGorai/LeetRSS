@@ -18,6 +18,7 @@ type Config struct {
 	Cache    CacheConfig
 	Database DatabaseConfig
 	Clerk    ClerkConfig
+	Limits   LimitsConfig
 }
 
 type DatabaseConfig struct {
@@ -28,6 +29,11 @@ type DatabaseConfig struct {
 
 type ClerkConfig struct {
 	SecretKey string
+}
+
+type LimitsConfig struct {
+	MaxFeedsPerUser     int
+	MaxUsernamesPerFeed int
 }
 
 type ServerConfig struct {
@@ -88,6 +94,10 @@ func Load() (*Config, error) {
 		},
 		Clerk: ClerkConfig{
 			SecretKey: GetEnv("CLERK_SECRET_KEY", "").(string),
+		},
+		Limits: LimitsConfig{
+			MaxFeedsPerUser:     clampInt(GetEnv("MAX_FEEDS_PER_USER", 3).(int), 1, 100),
+			MaxUsernamesPerFeed: clampInt(GetEnv("MAX_USERNAMES_PER_FEED", 3).(int), 1, 20),
 		},
 	}
 
