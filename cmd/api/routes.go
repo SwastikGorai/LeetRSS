@@ -36,7 +36,13 @@ func (app *app) routes() http.Handler {
 		protected.Use(app.clerkAuthMiddleware())
 		protected.Use(api.RequireAuth(app.store))
 		{
-			// TODO: Add protected endpoints here
+			protected.GET("/me", app.getCurrentUser)
+			protected.GET("/feeds", app.listFeeds)
+			protected.POST("/feeds", app.createFeed)
+			protected.GET("/feeds/:id", app.getFeed)
+			protected.PATCH("/feeds/:id", app.updateFeed)
+			protected.POST("/feeds/:id/rotate", app.rotateFeedSecret)
+			protected.DELETE("/feeds/:id", app.deleteFeed)
 		}
 	}
 

@@ -1,0 +1,704 @@
+package main
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"leetcode-rss/internal/api"
+	"leetcode-rss/internal/leetcode"
+	"leetcode-rss/internal/store"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+const (
+	maxFeedsPerUser     = 3
+	maxUsernamesPerFeed = 3
+	defaultFirstPerUser = 15
+	minFirstPerUser     = 1
+	maxFirstPerUser     = 50
+	maxFeedNameLength   = 100
+	secretBytes         = 32
+)
+
+func (app *app) getCurrentUser(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	user, err := app.store.GetUserByID(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "not_found",
+					"message": "user not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to fetch user",
+			},
+		})
+		return
+	}
+
+	feedCount, err := app.store.CountFeedsByUserID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to count feeds",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":          user.ID,
+		"email":       user.Email,
+		"created_at":  user.CreatedAt.Format(time.RFC3339),
+		"feeds_count": feedCount,
+	})
+}
+
+func (app *app) listFeeds(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feeds, err := app.store.ListFeedsByUserID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to list feeds",
+			},
+		})
+		return
+	}
+
+	result := make([]gin.H, 0, len(feeds))
+	for _, feed := range feeds {
+		result = append(result, gin.H{
+			"id":             feed.ID,
+			"name":           feed.Name,
+			"usernames":      feed.Usernames,
+			"first_per_user": feed.FirstPerUser,
+			"enabled":        feed.Enabled,
+			"url":            app.feedURL(feed.ID, feed.Secret),
+			"created_at":     feed.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (app *app) createFeed(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feedCount, err := app.store.CountFeedsByUserID(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to count feeds",
+			},
+		})
+		return
+	}
+	if feedCount >= maxFeedsPerUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "quota_exceeded",
+				"message": fmt.Sprintf("maximum %d feeds per user", maxFeedsPerUser),
+			},
+		})
+		return
+	}
+
+	var req struct {
+		Name         string   `json:"name"`
+		Usernames    []string `json:"usernames"`
+		FirstPerUser *int     `json:"first_per_user"`
+		Enabled      *bool    `json:"enabled"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "invalid request body",
+				"details": err.Error(),
+			},
+		})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "name is required",
+			},
+		})
+		return
+	}
+	if len(req.Name) > maxFeedNameLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": fmt.Sprintf("name must be at most %d characters", maxFeedNameLength),
+			},
+		})
+		return
+	}
+
+	if len(req.Usernames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "at least one username is required",
+			},
+		})
+		return
+	}
+	if len(req.Usernames) > maxUsernamesPerFeed {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": fmt.Sprintf("maximum %d usernames per feed", maxUsernamesPerFeed),
+			},
+		})
+		return
+	}
+
+	validUsernames := make([]string, 0, len(req.Usernames))
+	seen := make(map[string]struct{})
+	invalidUsernames := make([]string, 0)
+
+	for _, username := range req.Usernames {
+		username = strings.TrimSpace(username)
+		if username == "" {
+			continue
+		}
+		if err := leetcode.ValidateUsername(username); err != nil {
+			invalidUsernames = append(invalidUsernames, username)
+			continue
+		}
+		if _, exists := seen[username]; !exists {
+			seen[username] = struct{}{}
+			validUsernames = append(validUsernames, username)
+		}
+	}
+
+	if len(invalidUsernames) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "invalid usernames",
+				"details": invalidUsernames,
+			},
+		})
+		return
+	}
+
+	if len(validUsernames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "at least one valid username is required",
+			},
+		})
+		return
+	}
+
+	firstPerUser := defaultFirstPerUser
+	if req.FirstPerUser != nil {
+		firstPerUser = clampInt(*req.FirstPerUser, minFirstPerUser, maxFirstPerUser)
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	secret, err := generateSecret()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to generate secret",
+			},
+		})
+		return
+	}
+
+	now := time.Now()
+	feed := &store.Feed{
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		Name:         req.Name,
+		Secret:       secret,
+		Usernames:    validUsernames,
+		FirstPerUser: firstPerUser,
+		Enabled:      enabled,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := app.store.CreateFeed(c.Request.Context(), feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to create feed",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":             feed.ID,
+		"name":           feed.Name,
+		"usernames":      feed.Usernames,
+		"first_per_user": feed.FirstPerUser,
+		"enabled":        feed.Enabled,
+		"url":            app.feedURL(feed.ID, feed.Secret),
+		"created_at":     feed.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (app *app) getFeed(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feedID := c.Param("id")
+	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "not_found",
+					"message": "feed not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to fetch feed",
+			},
+		})
+		return
+	}
+
+	if feed.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": "you do not own this feed",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":             feed.ID,
+		"name":           feed.Name,
+		"usernames":      feed.Usernames,
+		"first_per_user": feed.FirstPerUser,
+		"enabled":        feed.Enabled,
+		"url":            app.feedURL(feed.ID, feed.Secret),
+		"created_at":     feed.CreatedAt.Format(time.RFC3339),
+		"updated_at":     feed.UpdatedAt.Format(time.RFC3339),
+	})
+}
+
+func (app *app) updateFeed(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feedID := c.Param("id")
+	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "not_found",
+					"message": "feed not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to fetch feed",
+			},
+		})
+		return
+	}
+
+	if feed.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": "you do not own this feed",
+			},
+		})
+		return
+	}
+
+	var req struct {
+		Name         *string  `json:"name"`
+		Usernames    []string `json:"usernames"`
+		FirstPerUser *int     `json:"first_per_user"`
+		Enabled      *bool    `json:"enabled"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "validation_error",
+				"message": "invalid request body",
+				"details": err.Error(),
+			},
+		})
+		return
+	}
+
+	needsCacheInvalidation := false
+
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": "name cannot be empty",
+				},
+			})
+			return
+		}
+		if len(name) > maxFeedNameLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": fmt.Sprintf("name must be at most %d characters", maxFeedNameLength),
+				},
+			})
+			return
+		}
+		feed.Name = name
+	}
+
+	if req.Usernames != nil {
+		if len(req.Usernames) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": "at least one username is required",
+				},
+			})
+			return
+		}
+		if len(req.Usernames) > maxUsernamesPerFeed {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": fmt.Sprintf("maximum %d usernames per feed", maxUsernamesPerFeed),
+				},
+			})
+			return
+		}
+
+		validUsernames := make([]string, 0, len(req.Usernames))
+		seen := make(map[string]struct{})
+		invalidUsernames := make([]string, 0)
+
+		for _, username := range req.Usernames {
+			username = strings.TrimSpace(username)
+			if username == "" {
+				continue
+			}
+			if err := leetcode.ValidateUsername(username); err != nil {
+				invalidUsernames = append(invalidUsernames, username)
+				continue
+			}
+			if _, exists := seen[username]; !exists {
+				seen[username] = struct{}{}
+				validUsernames = append(validUsernames, username)
+			}
+		}
+
+		if len(invalidUsernames) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": "invalid usernames",
+					"details": invalidUsernames,
+				},
+			})
+			return
+		}
+
+		if len(validUsernames) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code":    "validation_error",
+					"message": "at least one valid username is required",
+				},
+			})
+			return
+		}
+
+		feed.Usernames = validUsernames
+		needsCacheInvalidation = true
+	}
+
+	if req.FirstPerUser != nil {
+		newFirstPerUser := clampInt(*req.FirstPerUser, minFirstPerUser, maxFirstPerUser)
+		if newFirstPerUser != feed.FirstPerUser {
+			feed.FirstPerUser = newFirstPerUser
+			needsCacheInvalidation = true
+		}
+	}
+
+	if req.Enabled != nil {
+		feed.Enabled = *req.Enabled
+	}
+
+	feed.UpdatedAt = time.Now()
+
+	if err := app.store.UpdateFeed(c.Request.Context(), feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to update feed",
+			},
+		})
+		return
+	}
+
+	if needsCacheInvalidation {
+		_ = app.store.InvalidateFeedCache(c.Request.Context(), feed.ID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":             feed.ID,
+		"name":           feed.Name,
+		"usernames":      feed.Usernames,
+		"first_per_user": feed.FirstPerUser,
+		"enabled":        feed.Enabled,
+		"url":            app.feedURL(feed.ID, feed.Secret),
+		"created_at":     feed.CreatedAt.Format(time.RFC3339),
+		"updated_at":     feed.UpdatedAt.Format(time.RFC3339),
+	})
+}
+
+func (app *app) rotateFeedSecret(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feedID := c.Param("id")
+	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "not_found",
+					"message": "feed not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to fetch feed",
+			},
+		})
+		return
+	}
+
+	if feed.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": "you do not own this feed",
+			},
+		})
+		return
+	}
+
+	newSecret, err := generateSecret()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to generate secret",
+			},
+		})
+		return
+	}
+
+	feed.Secret = newSecret
+	feed.UpdatedAt = time.Now()
+
+	if err := app.store.UpdateFeed(c.Request.Context(), feed); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to update feed",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":             feed.ID,
+		"name":           feed.Name,
+		"usernames":      feed.Usernames,
+		"first_per_user": feed.FirstPerUser,
+		"enabled":        feed.Enabled,
+		"url":            app.feedURL(feed.ID, feed.Secret),
+		"created_at":     feed.CreatedAt.Format(time.RFC3339),
+		"updated_at":     feed.UpdatedAt.Format(time.RFC3339),
+	})
+}
+
+func (app *app) deleteFeed(c *gin.Context) {
+	userID, ok := api.GetUserID(c)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "missing user context",
+			},
+		})
+		return
+	}
+
+	feedID := c.Param("id")
+	feed, err := app.store.GetFeedByID(c.Request.Context(), feedID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "not_found",
+					"message": "feed not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to fetch feed",
+			},
+		})
+		return
+	}
+
+	if feed.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": "you do not own this feed",
+			},
+		})
+		return
+	}
+
+	if err := app.store.DeleteFeed(c.Request.Context(), feedID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "internal_error",
+				"message": "failed to delete feed",
+			},
+		})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (app *app) feedURL(feedID, secret string) string {
+	return fmt.Sprintf("%s/f/%s/%s.xml", app.config.Database.PublicBaseURL, feedID, secret)
+}
+
+func generateSecret() (string, error) {
+	b := make([]byte, secretBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random bytes: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
