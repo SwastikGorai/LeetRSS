@@ -1,9 +1,11 @@
-FROM golang:1.25-alpine AS build
+FROM golang:1.25-bookworm AS build
 
 WORKDIR /app
 
 # Install build dependencies for CGO (required by go-libsql)
-RUN apk add --no-cache gcc musl-dev
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -11,11 +13,13 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -o /app/bin/api ./cmd/api
 
-FROM alpine:3.20
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/bin/api ./api
 
