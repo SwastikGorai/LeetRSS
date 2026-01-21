@@ -17,12 +17,23 @@ type Config struct {
 	LeetCode LeetCodeConfig
 	Cache    CacheConfig
 	Database DatabaseConfig
+	Clerk    ClerkConfig
+	Limits   LimitsConfig
 }
 
 type DatabaseConfig struct {
 	URL           string
 	PublicBaseURL string
 	RSSCacheTTL   time.Duration
+}
+
+type ClerkConfig struct {
+	SecretKey string
+}
+
+type LimitsConfig struct {
+	MaxFeedsPerUser     int
+	MaxUsernamesPerFeed int
 }
 
 type ServerConfig struct {
@@ -80,6 +91,13 @@ func Load() (*Config, error) {
 			URL:           GetEnv("DATABASE_URL", "file:./data/leetrss.db?_journal=WAL").(string),
 			PublicBaseURL: GetEnv("PUBLIC_BASE_URL", "http://localhost:8080").(string),
 			RSSCacheTTL:   GetEnv("RSS_CACHE_TTL", 5*time.Minute).(time.Duration),
+		},
+		Clerk: ClerkConfig{
+			SecretKey: GetEnv("CLERK_SECRET_KEY", "").(string),
+		},
+		Limits: LimitsConfig{
+			MaxFeedsPerUser:     clampInt(GetEnv("MAX_FEEDS_PER_USER", 3).(int), 1, 100),
+			MaxUsernamesPerFeed: clampInt(GetEnv("MAX_USERNAMES_PER_FEED", 3).(int), 1, 20),
 		},
 	}
 

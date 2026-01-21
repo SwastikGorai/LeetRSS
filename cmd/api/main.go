@@ -7,7 +7,17 @@ import (
 	"leetcode-rss/internal/config"
 	"leetcode-rss/internal/leetcode"
 	"leetcode-rss/internal/store"
+
+	"github.com/clerk/clerk-sdk-go/v2"
 )
+
+type app struct {
+	config         *config.Config
+	store          store.Store
+	leetcodeClient *leetcode.Client
+	handlers       *api.Handlers
+	publicHandlers *api.PublicFeedHandlers
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -35,8 +45,21 @@ func main() {
 		publicHandlers = api.NewPublicFeedHandlers(s, lc, cfg.Database.RSSCacheTTL)
 		log.Printf("database initialized, public feeds enabled")
 	}
+
+	if cfg.Clerk.SecretKey != "" {
+		clerk.SetKey(cfg.Clerk.SecretKey)
+		log.Printf("clerk authentication enabled")
+	}
+
+	app := &app{
+		config:         cfg,
+		store:          s,
+		leetcodeClient: lc,
+		handlers:       handlers,
+		publicHandlers: publicHandlers,
+	}
+
 	log.Printf("listening on :%d (users=%v)", cfg.Server.Port, cfg.LeetCode.Usernames)
 
-	srv := newServer(cfg.Server.Port, routes(handlers, publicHandlers, cfg.Server.HandlerTimeout))
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(app.serve())
 }

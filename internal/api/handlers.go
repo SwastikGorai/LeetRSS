@@ -114,9 +114,7 @@ func (h *PublicFeedHandlers) PublicFeed(c *gin.Context) {
 			return
 		}
 		log.Printf("error fetching feed %s: %v", feedID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{"code": "internal_error", "message": "failed to fetch feed"},
-		})
+		AbortJSONError(c, http.StatusInternalServerError, ErrorCodeInternal, "failed to fetch feed")
 		return
 	}
 
@@ -145,9 +143,7 @@ func (h *PublicFeedHandlers) PublicFeed(c *gin.Context) {
 			h.serveCachedFeed(c, cache, true)
 			return
 		}
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": gin.H{"code": "upstream_error", "message": err.Error()},
-		})
+		AbortJSONError(c, http.StatusBadGateway, ErrorCodeUpstream, err.Error())
 		return
 	}
 
