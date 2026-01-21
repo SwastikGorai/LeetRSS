@@ -2,7 +2,18 @@
 
 .DEFAULT_GOAL := help
 
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
 DATABASE_URL ?= file:./data/leetrss.db?_journal=WAL&_timeout=5000
+
+ifneq (,$(findstring libsql://,$(DATABASE_URL)))
+MIGRATE_DRIVER := turso
+else
+MIGRATE_DRIVER := sqlite3
+endif
 
 help:
 	@echo "Usage: make [target]"
@@ -35,13 +46,13 @@ tidy:
 	@go mod tidy
 
 migrate-up:
-	@goose -dir migrations sqlite3 "$(DATABASE_URL)" up
+	@goose -dir migrations $(MIGRATE_DRIVER) "$(DATABASE_URL)" up
 
 migrate-down:
-	@goose -dir migrations sqlite3 "$(DATABASE_URL)" down
+	@goose -dir migrations $(MIGRATE_DRIVER) "$(DATABASE_URL)" down
 
 migrate-status:
-	@goose -dir migrations sqlite3 "$(DATABASE_URL)" status
+	@goose -dir migrations $(MIGRATE_DRIVER) "$(DATABASE_URL)" status
 
 migrate-create:
 	@goose -dir migrations create $(NAME) sql
