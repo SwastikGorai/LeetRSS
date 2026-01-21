@@ -1,6 +1,6 @@
 # leet-rss (LeetCode RSS)
 
-A small Go HTTP service that generates an RSS 2.0 feed from one or more users' LeetCode Solution Articles (Discuss) using LeetCode’s GraphQL API.
+A small Go HTTP service that generates an RSS 2.0 feed from one or more users' LeetCode Solution Articles (Discuss) using LeetCode's GraphQL API.
 
 ## What is there
 
@@ -17,46 +17,47 @@ The Go module lives under `leetcode-rss/`:
 - `leetcode-rss/internal/api/`: handlers, feed service, cache
 - `leetcode-rss/internal/leetcode/`: GraphQL client, query, models
 - `leetcode-rss/internal/rss/`: RSS structs and XML rendering
+- `leetcode-rss/internal/store/`: database repository layer (SQLite/TursoDB)
+- `leetcode-rss/migrations/`: database schema migrations (goose)
+- `leetcode-rss/data/`: local SQLite database files
 - `leetcode-rss/.env.example`: example local configuration
 
 ## Requirements
 
 - Go version specified in `leetcode-rss/go.mod`
 - Make (optional, for the provided `Makefile`)
+- [goose](https://github.com/pressly/goose) for database migrations (optional for development)
 
-## Configuration
+## Quick Start
 
-Create a local env file at `leetcode-rss/.env` (see `leetcode-rss/.env.example`):
+### 1. Install dependencies
 
-```dotenv
-LEETCODE_USERNAMES=user_one,user_two,user_three
-PORT=8080
-CACHE_TTL=2m
-LEETCODE_GRAPHQL_ENDPOINT=https://leetcode.com/graphql/
-LEETCODE_COOKIE=
-LEETCODE_CSRF=
+```bash
+# Install goose for database migrations
+go install github.com/pressly/goose/v3/cmd/goose@latest
 ```
 
-Environment variables:
-
-- `LEETCODE_USERNAMES` (required): comma-separated list of LeetCode usernames to generate the feed for
-- `PORT` (default `8080`): server listen port
-- `CACHE_TTL` (default `2m`): in-memory cache TTL (Go duration format, e.g. `30s`, `5m`)
-- `LEETCODE_GRAPHQL_ENDPOINT` (default `https://leetcode.com/graphql/`): GraphQL endpoint
-- `LEETCODE_COOKIE` (optional): cookie header value for authenticated requests
-- `LEETCODE_CSRF` (optional): CSRF token for authenticated requests
-
-## Run Locally
-
-From the module directory:
+### 2. Configure environment
 
 ```bash
 cd leetcode-rss
+cp .env.example .env
+# edit .env with your settings
+```
+
+### 3. Run database migrations
+
+```bash
+make migrate-up
+```
+
+### 4. Start the server
+
+```bash
 make run
 ```
 
 Then visit:
-
 - `http://localhost:8080/` (basic info)
 - `http://localhost:8080/health`
 - `http://localhost:8080/leetcode.xml` (RSS)
@@ -66,6 +67,93 @@ Then visit:
 ```bash
 curl -i http://localhost:8080/health
 curl -i http://localhost:8080/leetcode.xml
+```
+
+## Configuration
+
+Create a local env file at `leetcode-rss/.env` (see `leetcode-rss/.env.example`):
+
+```dotenv
+# Server configuration
+PORT=8080
+HANDLER_TIMEOUT=10s
+
+# LeetCode API settings
+LEETCODE_USERNAMES=user_one,user_two,user_three
+LEETCODE_GRAPHQL_ENDPOINT=https://leetcode.com/graphql/
+LEETCODE_MAX_ARTICLES=15
+LEETCODE_COOKIE=
+LEETCODE_CSRF=
+
+# Cache settings
+CACHE_TTL=2m
+
+# Database configuration (SQLite for local dev)
+DATABASE_URL=file:./data/leetrss.db?_journal=WAL&_timeout=5000
+
+# Public URL for generating feed URLs
+PUBLIC_BASE_URL=http://localhost:8080
+
+# Per-feed RSS cache TTL
+RSS_CACHE_TTL=5m
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LEETCODE_USERNAMES` | (required) | Comma-separated list of LeetCode usernames |
+| `PORT` | `8080` | Server listen port |
+| `HANDLER_TIMEOUT` | `10s` | Per-request handler timeout (Go duration) |
+| `CACHE_TTL` | `2m` | In-memory cache TTL (Go duration) |
+| `LEETCODE_MAX_ARTICLES` | `15` | Max articles per user (clamped 1-50) |
+| `LEETCODE_GRAPHQL_ENDPOINT` | `https://leetcode.com/graphql/` | GraphQL endpoint |
+| `LEETCODE_COOKIE` | (optional) | Cookie header for authenticated requests |
+| `LEETCODE_CSRF` | (optional) | CSRF token for authenticated requests |
+| `DATABASE_URL` | `file:./data/leetrss.db?...` | SQLite or TursoDB connection string |
+| `PUBLIC_BASE_URL` | `http://localhost:8080` | Base URL for feed URLs in API responses |
+| `RSS_CACHE_TTL` | `5m` | Per-feed cache TTL for multi-tenant feeds |
+
+## Database
+
+The service uses SQLite for local development and can use [TursoDB](https://turso.tech) for production.
+
+### Local Development (SQLite)
+
+```bash
+# Run migrations
+make migrate-up
+
+# Check migration status
+make migrate-status
+
+# Rollback last migration
+make migrate-down
+
+# Create a new migration
+make migrate-create NAME=add_new_table
+```
+
+### Production (TursoDB)
+
+```bash
+# Install Turso CLI
+curl -sSfL https://get.tur.so/install.sh | bash
+
+# Create database
+turso db create leetrss-prod --location lax
+
+# Get connection URL
+turso db show leetrss-prod --url
+
+# Create auth token
+turso db tokens create leetrss-prod
+
+# Set DATABASE_URL in production environment
+# DATABASE_URL=libsql://leetrss-prod-myorg.turso.io?authToken=eyJ...
+
+# Run migrations with goose turso driver
+goose -dir migrations turso "$DATABASE_URL" up
 ```
 
 ## How It Works
@@ -84,9 +172,13 @@ curl -i http://localhost:8080/leetcode.xml
 
 Run commands from `leetcode-rss/`:
 
-- `make test`: `go test ./... -mod=readonly`
+- `make run`: start the server
+- `make test`: run tests (`go test ./... -mod=readonly`)
 - `make fmt`: format with `gofmt`
 - `make tidy`: run `go mod tidy`
+- `make migrate-up`: run database migrations
+- `make migrate-down`: rollback last migration
+- `make migrate-status`: show migration status
 
 ### Testing Notes
 

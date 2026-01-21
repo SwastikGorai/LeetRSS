@@ -26,7 +26,10 @@ func New(endpoint, cookie, csrf string) *Client {
 }
 
 func (c *Client) Do(ctx context.Context, body any, out any) error {
-	b, _ := json.Marshal(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request body: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(
 		ctx,
