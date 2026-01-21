@@ -11,6 +11,7 @@ import (
 	"leetcode-rss/internal/store"
 
 	"github.com/clerk/clerk-sdk-go/v2"
+	clerkhttp "github.com/clerk/clerk-sdk-go/v2/http"
 	"github.com/clerk/clerk-sdk-go/v2/user"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,11 +21,39 @@ type ctxKey string
 
 const userIDKey ctxKey = "userID"
 
-func RequireAuth(s store.Store) gin.HandlerFunc {
+func ClerkAuthMiddleware(s store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		authFailed := false
+		authFailureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authFailed = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":{"code":"` + ErrorCodeUnauthorized + `","message":"Authentication required"}}`))
+		})
+
+		var updatedReq *http.Request
+		captureRequest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			updatedReq = r
+		})
+
+		clerkHandler := clerkhttp.WithHeaderAuthorization(
+			clerkhttp.AuthorizationFailureHandler(authFailureHandler),
+		)(captureRequest)
+
+		clerkHandler.ServeHTTP(c.Writer, c.Request)
+
+		if authFailed {
+			c.Abort()
+			return
+		}
+
+		if updatedReq != nil {
+			c.Request = updatedReq
+		}
+
 		claims, ok := clerk.SessionClaimsFromContext(c.Request.Context())
 		if !ok {
-			AbortJSONError(c, http.StatusUnauthorized, ErrorCodeUnauthorized, "missing or invalid authentication")
+			AbortJSONError(c, http.StatusUnauthorized, ErrorCodeUnauthorized, "invalid token")
 			return
 		}
 

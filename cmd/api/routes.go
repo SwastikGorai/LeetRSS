@@ -6,12 +6,12 @@ import (
 
 	"leetcode-rss/internal/api"
 
-	clerkhttp "github.com/clerk/clerk-sdk-go/v2/http"
 	"github.com/gin-gonic/gin"
 )
 
 func (app *app) routes() http.Handler {
 	g := gin.Default()
+	g.Use(corsMiddleware())
 
 	health := g.Group("/health")
 	{
@@ -33,8 +33,7 @@ func (app *app) routes() http.Handler {
 
 	if app.config.Clerk.SecretKey != "" && app.store != nil {
 		protected := g.Group("/")
-		protected.Use(app.clerkAuthMiddleware())
-		protected.Use(api.RequireAuth(app.store))
+		protected.Use(api.ClerkAuthMiddleware(app.store))
 		{
 			protected.GET("/me", app.getCurrentUser)
 			protected.GET("/feeds", app.listFeeds)
@@ -64,25 +63,5 @@ func (app *app) withTimeout(fn gin.HandlerFunc) gin.HandlerFunc {
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		fn(c)
-	}
-}
-
-func (app *app) clerkAuthMiddleware() gin.HandlerFunc {
-	authFailureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"code":"` + api.ErrorCodeUnauthorized + `","message":"Authentication required"}}`))
-	})
-	passthrough := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	clerkHandler := clerkhttp.WithHeaderAuthorization(
-		clerkhttp.AuthorizationFailureHandler(authFailureHandler),
-	)(passthrough)
-
-	return func(c *gin.Context) {
-		gin.WrapH(clerkHandler)(c)
-		if c.Writer.Status() == http.StatusUnauthorized {
-			c.Abort()
-			return
-		}
 	}
 }
