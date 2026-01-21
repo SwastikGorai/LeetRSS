@@ -8,6 +8,8 @@ A small Go HTTP service that generates an RSS 2.0 feed from one or more users' L
 - Health endpoint: `GET /health`
 - In-memory TTL cache for the generated RSS
 - Optional support for authenticated requests via `LEETCODE_COOKIE` and `LEETCODE_CSRF`
+- Public per-feed RSS endpoint: `GET /f/:feedID/:secret.xml`
+- Authenticated feed management API (requires Clerk): `GET /me`, `GET /feeds`, `POST /feeds`, `PATCH /feeds/:id`, `POST /feeds/:id/rotate`, `DELETE /feeds/:id`
 
 ## Project Layout
 
@@ -80,6 +82,7 @@ HANDLER_TIMEOUT=10s
 
 # LeetCode API settings
 LEETCODE_USERNAMES=user_one,user_two,user_three
+LEETCODE_USERNAME=user_one
 LEETCODE_GRAPHQL_ENDPOINT=https://leetcode.com/graphql/
 LEETCODE_MAX_ARTICLES=15
 LEETCODE_COOKIE=
@@ -96,6 +99,13 @@ PUBLIC_BASE_URL=http://localhost:8080
 
 # Per-feed RSS cache TTL
 RSS_CACHE_TTL=5m
+
+# Clerk authentication
+CLERK_SECRET_KEY=
+
+# Limits
+MAX_FEEDS_PER_USER=3
+MAX_USERNAMES_PER_FEED=3
 ```
 
 ### Environment Variables
@@ -113,6 +123,22 @@ RSS_CACHE_TTL=5m
 | `DATABASE_URL` | `file:./data/leetrss.db?...` | SQLite or TursoDB connection string |
 | `PUBLIC_BASE_URL` | `http://localhost:8080` | Base URL for feed URLs in API responses |
 | `RSS_CACHE_TTL` | `5m` | Per-feed cache TTL for multi-tenant feeds |
+| `CLERK_SECRET_KEY` | (optional) | Enables Clerk auth for protected feed endpoints |
+| `MAX_FEEDS_PER_USER` | `3` | Max number of feeds per user (clamped 1-100) |
+| `MAX_USERNAMES_PER_FEED` | `3` | Max usernames per feed (clamped 1-20) |
+
+## Authentication (Clerk)
+
+If `CLERK_SECRET_KEY` is set, the service enables protected API routes and verifies Clerk JWTs:
+
+- `GET /me`: returns the current user record
+- `GET /feeds`: list feeds for the user
+- `POST /feeds`: create a new feed
+- `PATCH /feeds/:id`: update feed settings
+- `POST /feeds/:id/rotate`: rotate the feed secret
+- `DELETE /feeds/:id`: delete a feed
+
+When the secret key is missing, these routes are not registered.
 
 ## Database
 
@@ -140,17 +166,17 @@ make migrate-create NAME=add_new_table
 # Install Turso CLI
 curl -sSfL https://get.tur.so/install.sh | bash
 
-# Create database
-turso db create leetrss-prod --location lax
+# create za database
+turso db create leetrss-prod
 
-# Get connection URL
-turso db show leetrss-prod --url
+# get connection URL
+turso db show --url leetrss-prod
 
-# Create auth token
+# create auth token
 turso db tokens create leetrss-prod
 
-# Set DATABASE_URL in production environment
-# DATABASE_URL=libsql://leetrss-prod-myorg.turso.io?authToken=eyJ...
+# Set DATABASE_URL in prod environment
+# DATABASE_URL=libsql://name-prod-myorg.turso.io?authToken=eyJ...
 
 # Run migrations with goose turso driver
 goose -dir migrations turso "$DATABASE_URL" up
